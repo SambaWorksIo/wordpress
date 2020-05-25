@@ -72,7 +72,7 @@ RUN { \
 		echo 'ignore_repeated_source = Off'; \
 		echo 'html_errors = Off'; \
 	} > /usr/local/etc/php/conf.d/error-logging.ini
-%%VARIANT_EXTRAS%%
+
 VOLUME /var/www/html
 
 ENV WORDPRESS_VERSION %%WORDPRESS_VERSION%%
