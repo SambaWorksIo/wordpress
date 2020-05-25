@@ -1,24 +1,24 @@
 FROM php:%%PHP_VERSION%%-%%VARIANT%%
 
 # persistent dependencies
-RUN apk add --no-cache \
-# in theory, docker-entrypoint.sh is POSIX-compliant, but priority is a working, consistent image
-		bash \
-# BusyBox sed is not sufficient for some of our sed expressions
-		sed \
+RUN set -eux; \
+	apt-get update; \
+	apt-get install -y --no-install-recommends \
 # Ghostscript is required for rendering PDF previews
 		ghostscript \
-# Alpine package for "imagemagick" contains ~120 .so files, see: https://github.com/docker-library/wordpress/pull/497
-		imagemagick
+	; \
+	rm -rf /var/lib/apt/lists/*
 
 # install the PHP extensions we need (https://make.wordpress.org/hosting/handbook/handbook/server-environment/#php-extensions)
 RUN set -ex; \
 	\
-	apk add --no-cache --virtual .build-deps \
-		$PHPIZE_DEPS \
-		freetype-dev \
-		imagemagick-dev \
-		libjpeg-turbo-dev \
+	savedAptMark="$(apt-mark showmanual)"; \
+	\
+	apt-get update; \
+	apt-get install -y --no-install-recommends \
+		libfreetype6-dev \
+		libjpeg-dev \
+		libmagickwand-dev \
 		libpng-dev \
 		libzip-dev \
 	; \
@@ -35,14 +35,19 @@ RUN set -ex; \
 	pecl install imagick-3.4.4; \
 	docker-php-ext-enable imagick; \
 	\
-	runDeps="$( \
-		scanelf --needed --nobanner --format '%n#p' --recursive /usr/local/lib/php/extensions \
-			| tr ',' '\n' \
-			| sort -u \
-			| awk 'system("[ -e /usr/local/lib/" $1 " ]") == 0 { next } { print "so:" $1 }' \
-	)"; \
-	apk add --virtual .wordpress-phpexts-rundeps $runDeps; \
-	apk del .build-deps
+# reset apt-mark's "manual" list so that "purge --auto-remove" will remove all build dependencies
+	apt-mark auto '.*' > /dev/null; \
+	apt-mark manual $savedAptMark; \
+	ldd "$(php -r 'echo ini_get("extension_dir");')"/*.so \
+		| awk '/=>/ { print $3 }' \
+		| sort -u \
+		| xargs -r dpkg-query -S \
+		| cut -d: -f1 \
+		| sort -u \
+		| xargs -rt apt-mark manual; \
+	\
+	apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \
+	rm -rf /var/lib/apt/lists/*
 
 # set recommended PHP.ini settings
 # see https://secure.php.net/manual/en/opcache.installation.php
@@ -67,7 +72,7 @@ RUN { \
 		echo 'ignore_repeated_source = Off'; \
 		echo 'html_errors = Off'; \
 	} > /usr/local/etc/php/conf.d/error-logging.ini
-
+%%VARIANT_EXTRAS%%
 VOLUME /var/www/html
 
 ENV WORDPRESS_VERSION %%WORDPRESS_VERSION%%
